@@ -3,6 +3,11 @@ from transformers import AutoModelForQuestionAnswering, AutoTokenizer, pipeline
 import torch
 from sentence_transformers import util
 import logging
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+import numpy as np
+import requests
+import time
+
 # Load embedding model
 embed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
 embed_model = SentenceTransformer(embed_model_name)
@@ -17,8 +22,17 @@ def get_embeddings(text):
     return embeddings
 
 
+
+    # Calculate cosine similarity between query and passages
+
+
+logging.basicConfig(level=logging.DEBUG)
+api_token="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"
+
+
 def get_response(query_embeddings, query_text, passages, passage_embeddings):
     # Find the most similar passages
+    logging.debug("started the response function")
     cosine_scores = util.pytorch_cos_sim(query_embeddings, passage_embeddings)
     top_scores, top_indices = torch.topk(cosine_scores, k=3)
 
@@ -27,17 +41,43 @@ def get_response(query_embeddings, query_text, passages, passage_embeddings):
         input_passages += passages[idx.item()] + " "  # Concatenate with space  # Extract top passages
     logging.debug(f"Top passages: {input_passages}")
 
-    # Prepare input for question-answering pipeline
-    QA_input = {
-        'question': query_text,
-        'context': input_passages
+
+    input_text = f"Context: {input_passages}\n\nQuestion: {query_text}"
+    logging.debug(f"Input text for the model: {input_text}")
+
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json"
+    } 
+
+
+    payload = {
+        "inputs": input_text,
+        "parameters": {
+            "max_length": 1024,
+            "num_return_sequences": 1,
+        }
     }
-    logging.debug(f"QA input: {QA_input}")
-    # Get predictions using question-answering pipeline
-    nlp = pipeline('question-answering', model=model, tokenizer=tokenizer)
-    res = nlp(QA_input)
-    logging.debug(f"Response: {res}")
-    return res['answer']
+    logging.debug("Headers and payload prepared")
+
+
+    logging.debug("Making request to Hugging Face Inference API")
+    response = requests.post(f"https://api-inference.huggingface.co/models/facebook/bart-large-cnn", headers=headers, json=input_text)
+    logging.debug("resquest successful")
+    # Check for errors
+    # if response.status_code != 200:
+    #     logging.error(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
+    #     raise ValueError(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
+    if response.status_code == 200:
+            res = response.json()
+            logging.debug(f"Response: {res}")
+            return res[0]
+    # Parse the response
+    generated_text = response.json()[0]["generated_text"]
+    logging.debug(f"Generated text: {generated_text}")
+
+    return res[0]
+    
 
 
 

@@ -68,7 +68,7 @@ def upload_pdf():
         logging.error(f"Error uploading PDF: {e}")
         return jsonify({'error': str(e)}), 500
 
-
+api_token="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"
 @app.route('/query', methods=['POST'])
 def query():
     try:
