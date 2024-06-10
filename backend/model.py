@@ -8,49 +8,81 @@ import numpy as np
 import requests
 import time
 
-# Load embedding model
-embed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
-embed_model = SentenceTransformer(embed_model_name)
+def split_text_and_embeddings(words, embeddings, max_chunk_size):
+    """
+    Split the text and embeddings into chunks.
+    
+    Args:
+    words (list): The list of words to be split into chunks.
+    embeddings (list): The list of embeddings to be split into corresponding chunks.
+    max_chunk_size (int): The maximum size of each chunk.
+    
+    Returns:
+    list of str: List of text chunks.
+    list of list: List of corresponding embeddings for each chunk.
+    """
+    chunks = []
+    chunk_embeddings = []
+    current_chunk = []
+    current_embeddings = []
 
+    for idx, word in enumerate(words):
+        current_chunk.append(word)
+        current_embeddings.append(embeddings[idx])
+        
+        if len(" ".join(current_chunk)) >= max_chunk_size:
+            chunks.append(" ".join(current_chunk))
+            chunk_embeddings.append(current_embeddings)
+            current_chunk = []
+            current_embeddings = []
 
-model_name = "deepset/roberta-base-squad2"
-model = AutoModelForQuestionAnswering.from_pretrained(model_name)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+        chunk_embeddings.append(current_embeddings)
+
+    return chunks, chunk_embeddings
 
 def get_embeddings(text):
+    embed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    embed_model = SentenceTransformer(embed_model_name)
     embeddings = embed_model.encode(text, convert_to_tensor=True)
     return embeddings
 
-
-
-    # Calculate cosine similarity between query and passages
 
 
 logging.basicConfig(level=logging.DEBUG)
 api_token="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"
 
 
-def get_response(query_embeddings, query_text, passages, passage_embeddings):
-    # Find the most similar passages
-    logging.debug("started the response function")
-    cosine_scores = util.pytorch_cos_sim(query_embeddings, passage_embeddings)
-    top_scores, top_indices = torch.topk(cosine_scores, k=3)
+def get_response(top_chunks,query_text):
+    # # Find the most similar passages
+    # logging.debug("started the response function")
 
-    input_passages = ""
-    for idx in top_indices[0]:  # Iterate through top indices
-        input_passages += passages[idx.item()] + " "  # Concatenate with space  # Extract top passages
-    logging.debug(f"Top passages: {input_passages}")
+    # # Ensure the embeddings and passages are correctly paired
+    # # if len(passages) != len(passage_embeddings):
+    # #     raise ValueError("Number of passages and passage embeddings must match.")
 
+    # # Compute similarity scores
+    # similarity_scores = util.pytorch_cos_sim(query_embeddings, passage_embeddings)
+    # top_scores, top_indices = torch.topk(similarity_scores, k=3)
 
+    # # Retrieve the top chunks based on similarity scores
+    # top_chunks = [passages[idx.item()] for idx in top_indices[0]]
+    # logging.debug(f"Top chunks: {top_chunks}")
+
+    # # Concatenate the top chunks to form the input passages
+    input_passages = top_chunks
+    # Prepare the input text for the model
     input_text = f"Context: {input_passages}\n\nQuestion: {query_text}"
     logging.debug(f"Input text for the model: {input_text}")
-
+    
+    # Define headers for the Hugging Face Inference API request
     headers = {
         "Authorization": f"Bearer {api_token}",
         "Content-Type": "application/json"
-    } 
+    }
 
-
+    # Define the payload for the request
     payload = {
         "inputs": input_text,
         "parameters": {
@@ -60,41 +92,37 @@ def get_response(query_embeddings, query_text, passages, passage_embeddings):
     }
     logging.debug("Headers and payload prepared")
 
-
+    # Make the request to the Hugging Face Inference API
     logging.debug("Making request to Hugging Face Inference API")
-    response = requests.post(f"https://api-inference.huggingface.co/models/facebook/bart-large-cnn", headers=headers, json=input_text)
-    logging.debug("resquest successful")
-    # Check for errors
-    # if response.status_code != 200:
-    #     logging.error(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
-    #     raise ValueError(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
-    if response.status_code == 200:
-            res = response.json()
-            logging.debug(f"Response: {res}")
-            return res[0]
-    # Parse the response
-    generated_text = response.json()[0]["generated_text"]
-    logging.debug(f"Generated text: {generated_text}")
+    response = requests.post(
+        "https://api-inference.huggingface.co/models/facebook/bart-large-cnn",
+        headers=headers,
+        json=payload
+    )
 
-    return res[0]
-    
+    # Check for errors in the response
+    if response.status_code != 200:
+        logging.error(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
+        raise ValueError(f"Error querying Hugging Face API: {response.status_code}, {response.text}")
+
+    logging.debug("Request successful")
+    res = response.json()
+    logging.debug(f"Response: {res}")
+
+    # Extract the generated text from the response
+    generated_text = res[0]["summary_text"]
+
+    return generated_text
 
 
 
-def split_text_into_passages(text):
-    """
-    Split text into passages for better embedding comparison.
-    
-    Args:
-    text (str): The input text to be split into passages.
-    
-    Returns:
-    list of str: List of passages.
-    """
-    # Split by paragraphs or sentences, adjust as needed
-    passages = text.split('\n')
-    passages = [p for p in passages if p.strip()]  # Remove empty passages
-    return passages
+
+
+
+
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 
 def split_text_into_chunks(text, max_chunk_size):
     """
@@ -107,20 +135,14 @@ def split_text_into_chunks(text, max_chunk_size):
     Returns:
     list of str: List of text chunks.
     """
-    # If the text is already small enough, return it as a single chunk
-    if len(text) <= max_chunk_size:
-        return [text]
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_chunk_size,
+        chunk_overlap=10,
+        length_function=len,
+        is_separator_regex=False
+    )
+    text_chunks = text_splitter.split_text(text)
+    return text_chunks
+
     
-    # Try to split at a natural break point within the limit
-    split_points = ['\n', '. ', '!', '?', ';', ':']
-    for split_point in split_points:
-        index = text.rfind(split_point, 0, max_chunk_size)
-        if index != -1:
-            left_chunk = text[:index + len(split_point)]
-            right_chunk = text[index + len(split_point):]
-            return split_text_into_chunks(left_chunk.strip(), max_chunk_size) + split_text_into_chunks(right_chunk.strip(), max_chunk_size)
-    
-    # If no natural break point is found, split at the max_chunk_size
-    left_chunk = text[:max_chunk_size]
-    right_chunk = text[max_chunk_size:]
-    return split_text_into_chunks(left_chunk.strip(), max_chunk_size) + split_text_into_chunks(right_chunk.strip(), max_chunk_size)
+   

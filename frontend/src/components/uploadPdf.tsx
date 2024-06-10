@@ -6,9 +6,15 @@ import { useState } from "react";
 const UploadPDF = ({ setPdfId }) => {
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
+  const [customId, setCustomId] = useState("");
 
   const handleFileChange = (e: any) => {
     setFile(e.target.files[0]);
+    setError("");
+  };
+
+  const handleIdChange = (e: any) => {
+    setCustomId(e.target.value);
     setError("");
   };
 
@@ -18,8 +24,14 @@ const UploadPDF = ({ setPdfId }) => {
       return;
     }
 
+    if (!customId) {
+      setError("Please enter a custom ID.");
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("id", customId);
 
     try {
       const response = await axios.post(
@@ -31,7 +43,7 @@ const UploadPDF = ({ setPdfId }) => {
           },
         }
       );
-      setPdfId(response.data.id);
+      setPdfId(customId);
     } catch (error) {
       setError("Failed to upload PDF.");
     }
@@ -41,6 +53,12 @@ const UploadPDF = ({ setPdfId }) => {
     <div>
       <h2>Upload PDF</h2>
       <input type="file" onChange={handleFileChange} />
+      <input
+        type="text"
+        placeholder="Enter custom ID"
+        value={customId}
+        onChange={handleIdChange}
+      />
       <button onClick={handleUpload}>Upload</button>
       {error && <p style={{ color: "red" }}>{error}</p>}
     </div>
